@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch._tensor as tensor
 import torch.nn.functional as F
 import torch.utils.checkpoint as cp
 import Enhanced_Inception_Module
@@ -17,44 +18,52 @@ def _bn_function_factory(norm, relu, conv):
 
 
 class _DenseLayer(nn.Module):
-    def __init__(self, num_input_features, growth_rate, bn_size, drop_rate, model_dimensions_of_convolution,
+    def __init__(self, number_of_input_features, growth_rate, batch_norm_size, drop_rate,
+                 model_dimensions_of_convolution,
                  efficient=False):
         super(_DenseLayer, self).__init__()
-        self.add_module('batch_norm_1_1d', nn.BatchNorm1d(num_input_features)),
-        self.add_module('batch_norm_1_2d', nn.BatchNorm2d(num_input_features)),
-        self.add_module('batch_norm_1_3d', nn.BatchNorm3d(num_input_features)),
+        self.add_module('batch_norm_1_1d', nn.BatchNorm1d(number_of_input_features)),
+        self.add_module('batch_norm_1_2d', nn.BatchNorm2d(number_of_input_features)),
+        self.add_module('batch_norm_1_3d', nn.BatchNorm3d(number_of_input_features)),
+
         self.add_module('relu1', nn.ReLU(inplace=True)),
-        self.add_module('convolution_1d_1x1', nn.Conv1d(num_input_features, bn_size * growth_rate,
+
+        self.add_module('convolution_1d_1x1', nn.Conv1d(number_of_input_features, batch_norm_size * growth_rate,
                                                         kernel_size=1, stride=1, bias=False)),
-        self.add_module('convolution_2d_1x1', nn.Conv2d(num_input_features, bn_size * growth_rate,
+        self.add_module('convolution_2d_1x1', nn.Conv2d(number_of_input_features, batch_norm_size * growth_rate,
                                                         kernel_size=1, stride=1, bias=False)),
-        self.add_module('convolution_3d_1x1', nn.Conv3d(num_input_features, bn_size * growth_rate,
+        self.add_module('convolution_3d_1x1', nn.Conv3d(number_of_input_features, batch_norm_size * growth_rate,
                                                         kernel_size=1, stride=1, bias=False)),
-        self.add_module('batch_norm_2_1d', nn.BatchNorm1d(bn_size * growth_rate)),
-        self.add_module('batch_norm_2_2d', nn.BatchNorm2d(bn_size * growth_rate)),
-        self.add_module('batch_norm_2_3d', nn.BatchNorm3d(bn_size * growth_rate)),
+
+        self.add_module('batch_norm_2_1d', nn.BatchNorm1d(batch_norm_size * growth_rate)),
+        self.add_module('batch_norm_2_2d', nn.BatchNorm2d(batch_norm_size * growth_rate)),
+        self.add_module('batch_norm_2_3d', nn.BatchNorm3d(batch_norm_size * growth_rate)),
+
         self.add_module('relu2', nn.ReLU(inplace=True)),
+
         self.add_module('inception',
-                        Enhanced_Inception_Module.EnhancedInceptionModule(input_data_depth=bn_size * growth_rate,
-                                                                          output_data_depth=growth_rate,
-                                                                          number_of_convolution_filters=16,
-                                                                          max_kernel_size=11,
-                                                                          dimensions_of_convolution=model_dimensions_of_convolution)),
+                        Enhanced_Inception_Module.EnhancedInceptionModule(
+                            input_data_depth=batch_norm_size * growth_rate,
+                            output_data_depth=growth_rate,
+                            number_of_convolution_filters=16,
+                            max_kernel_size=11,
+                            dimensions_of_convolution=model_dimensions_of_convolution)),
         self.drop_rate = drop_rate
         self.efficient = efficient
 
-    def forward(self, *prev_features):
-        bn_function = _bn_function_factory(self.batch_norm_1_2d, self.relu1, self.convolution_2d_1x1)
+    def forward(self, *previous_features):
 
+        bn_function = _bn_function_factory(self.batch_norm_1_2d, self.relu1, self.convolution_2d_1x1)
         if self.dimensions_of_convolution == 1:
             bn_function = _bn_function_factory(self.batch_norm_1_1d, self.relu1, self.convolution_1d_1x1)
         elif self.dimensions_of_convolution == 3:
             bn_function = _bn_function_factory(self.batch_norm_1_3d, self.relu1, self.convolution_3d_1x1)
 
-        if self.efficient and any(prev_feature.requires_grad for prev_feature in prev_features):
-            bottleneck_output = cp.checkpoint(bn_function, *prev_features)
+        if self.efficient and any(prev_feature.requires_grad for prev_feature in previous_features):
+            bottleneck_output = cp.checkpoint(bn_function, *previous_features)
         else:
-            bottleneck_output = bn_function(*prev_features)
+            bottleneck_output = bn_function(*previous_features)
+
         new_features = self.inception(self.relu2(self.batch_norm2(bottleneck_output)))
         if self.drop_rate > 0:
             new_features = F.dropout(new_features, p=self.drop_rate, training=self.training)
@@ -62,18 +71,18 @@ class _DenseLayer(nn.Module):
 
 
 class _Transition(nn.Module):
-    def __init__(self, num_input_features, num_output_features, model_dimensions_of_convolution):
+    def __init__(self, number_of_input_features, num_output_features, model_dimensions_of_convolution):
         super(_Transition, self).__init__()
         self.model_dimensions_of_convolution = model_dimensions_of_convolution
-        self.add_module('batch_norm_1d', nn.BatchNorm1d(num_input_features))
-        self.add_module('batch_norm_2d', nn.BatchNorm2d(num_input_features))
-        self.add_module('batch_norm_3d', nn.BatchNorm3d(num_input_features))
+        self.add_module('batch_norm_1d', nn.BatchNorm1d(number_of_input_features))
+        self.add_module('batch_norm_2d', nn.BatchNorm2d(number_of_input_features))
+        self.add_module('batch_norm_3d', nn.BatchNorm3d(number_of_input_features))
         self.add_module('relu', nn.ReLU(inplace=True))
-        self.add_module('convolution_1x1_1d', nn.Conv1d(num_input_features, num_output_features,
+        self.add_module('convolution_1x1_1d', nn.Conv1d(number_of_input_features, num_output_features,
                                                         kernel_size=1, stride=1, bias=False))
-        self.add_module('convolution_1x1_2d', nn.Conv2d(num_input_features, num_output_features,
+        self.add_module('convolution_1x1_2d', nn.Conv2d(number_of_input_features, num_output_features,
                                                         kernel_size=1, stride=1, bias=False))
-        self.add_module('convolution_1x1_3d', nn.Conv3d(num_input_features, num_output_features,
+        self.add_module('convolution_1x1_3d', nn.Conv3d(number_of_input_features, num_output_features,
                                                         kernel_size=1, stride=1, bias=False))
         self.add_module('average_pool_1d', nn.AvgPool1d(kernel_size=2, stride=2))
         self.add_module('average_pool_2d', nn.AvgPool2d(kernel_size=2, stride=2))
@@ -96,26 +105,23 @@ class _Transition(nn.Module):
 
 
 class _DenseBlock(nn.Module):
-    def __init__(self, num_layers, num_input_features, bn_size, growth_rate, drop_rate, model_dimensions_of_convolution,
+    def __init__(self, number_of_layers, number_of_input_features, batch_norm_size, growth_rate, drop_rate,
+                 model_dimensions_of_convolution,
                  efficient=False):
         super(_DenseBlock, self).__init__()
-        for i in range(num_layers):
-            layer = _DenseLayer(
-                num_input_features + i * growth_rate,
-                growth_rate=growth_rate,
-                bn_size=bn_size,
-                drop_rate=drop_rate,
-                efficient=efficient,
-                model_dimensions_of_convolution=model_dimensions_of_convolution
-            )
-            self.add_module('denselayer%d' % (i + 1), layer)
+        self.dense_layer = _DenseLayer(number_of_input_features=number_of_input_features,
+                                       growth_rate=growth_rate, batch_norm_size=batch_norm_size,
+                                       model_dimensions_of_convolution=model_dimensions_of_convolution,
+                                       drop_rate=drop_rate, efficient=efficient
+                                       )
+        self.number_of_layers = number_of_layers
 
-    def forward(self, init_features):
-        features = [init_features]
-        for name, layer in self.named_children():
-            new_features = layer(*features)
-            features.append(new_features)
-        return torch.cat(features, 1)
+    def forward(self, initial_features):
+        features = torch.tensor(initial_features)
+        for i in range(self.number_of_layers):
+            new_features = self.dense_layer(features)
+            features = torch.cat((features, new_features), dim=0)
+        return features
 
 
 class DenseNeXt(nn.Module):
@@ -123,18 +129,18 @@ class DenseNeXt(nn.Module):
     `"Densely Connected Convolutional Networks" <https://arxiv.org/pdf/1608.06993.pdf>`
     Args:
         growth_rate (int) - how many filters to add each layer (`k` in paper)
-        block_config (list of 3 or 4 ints) - how many layers in each pooling block
-        num_init_features (int) - the number of filters to learn in the first convolution layer
-        bn_size (int) - multiplicative factor for number of bottle neck layers
-            (i.e. bn_size * k features in the bottleneck layer)
+        dense_block_configuration (list of 3 or 4 ints) - how many layers in each pooling block
+        number_of_initial_features (int) - the number of filters to learn in the first convolution layer
+        batch_norm_size (int) - multiplicative factor for number of bottle neck layers
+            (i.e. batch_norm_size * k features in the bottleneck layer)
         drop_rate (float) - dropout rate after each dense layer
         num_classes (int) - number of classification classes
         small_inputs (bool) - set to True if images are 32x32. Otherwise assumes images are larger.
         efficient (bool) - set to True to use checkpointing. Much more memory efficient, but slower.
     """
 
-    def __init__(self, growth_rate=12, block_config=(16, 16, 16), compression=0.5,
-                 num_init_features=24, bn_size=4, drop_rate=0,
+    def __init__(self, growth_rate=12, dense_block_configuration=(16, 16, 16), compression=0.5,
+                 number_of_initial_features=24, batch_norm_size=4, drop_rate=0,
                  num_classes=10, model_dimensions_of_convolution=2, small_inputs=True, efficient=False):
 
         super(DenseNeXt, self).__init__()
@@ -143,41 +149,45 @@ class DenseNeXt(nn.Module):
         # First convolution
         if small_inputs:
             self.features = nn.Sequential(OrderedDict([
-                ('conv0', nn.Conv2d(3, num_init_features, kernel_size=3, stride=1, padding=1, bias=False)),
+                ('conv0', nn.Conv2d(3, number_of_initial_features, kernel_size=3, stride=1, padding=1, bias=False)),
             ]))
         else:
             self.features = nn.Sequential(OrderedDict([
-                ('conv0', nn.Conv2d(3, num_init_features, kernel_size=7, stride=2, padding=3, bias=False)),
+                ('conv0', nn.Conv2d(3, number_of_initial_features, kernel_size=7, stride=2, padding=3, bias=False)),
             ]))
-            self.features.add_module('norm0', nn.BatchNorm2d(num_init_features))
+            self.features.add_module('norm0', nn.BatchNorm2d(number_of_initial_features))
             self.features.add_module('relu0', nn.ReLU(inplace=True))
             self.features.add_module('pool0', nn.MaxPool2d(kernel_size=3, stride=2, padding=1,
                                                            ceil_mode=False))
 
         # Each Dense Block
-        num_features = num_init_features
-        for i, num_layers in enumerate(block_config):
+        number_of_features = number_of_initial_features
+        for i, number_of_layers in enumerate(dense_block_configuration):
             block = _DenseBlock(
-                num_layers=num_layers,
-                num_input_features=num_features,
-                bn_size=bn_size,
+                number_of_layers=number_of_layers,
+                number_of_input_features=number_of_features,
+                batch_norm_size=batch_norm_size,
                 growth_rate=growth_rate,
                 drop_rate=drop_rate,
                 efficient=efficient,
+                model_dimensions_of_convolution=model_dimensions_of_convolution
             )
-            self.features.add_module('denseblock%d' % (i + 1), block)
-            num_features = num_features + num_layers * growth_rate
-            if i != len(block_config) - 1:
-                trans = _Transition(num_input_features=num_features,
-                                    num_output_features=int(num_features * compression))
-                self.features.add_module('transition%d' % (i + 1), trans)
-                num_features = int(num_features * compression)
+            self.features.add_module('dense_block_%d' % (i + 1), block)
+
+            number_of_features = number_of_features + number_of_layers * growth_rate
+            if i != len(dense_block_configuration) - 1:
+                transition = _Transition(number_of_input_features=number_of_features,
+                                         num_output_features=int(number_of_features * compression),
+                                         model_dimensions_of_convolution=model_dimensions_of_convolution
+                                         )
+                self.features.add_module('transition_%d' % (i + 1), transition)
+                number_of_features = int(number_of_features * compression)
 
         # Final batch norm
-        self.features.add_module('norm_final', nn.BatchNorm2d(num_features))
+        self.features.add_module('norm_final', nn.BatchNorm2d(number_of_features))
 
         # Linear layer
-        self.classifier = nn.Linear(num_features, num_classes)
+        self.classifier = nn.Linear(number_of_features, num_classes)
 
         # Initialization
         for name, param in self.named_parameters():
