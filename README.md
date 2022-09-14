@@ -1,2 +1,2 @@
 # DenseNeXt
-DenseNeXt is a a CNN which integrates the inception module into the DenseNet architecture.
+DenseNeXt is a a CNN architecture which integrates the inception module into the DenseNet architecture.
