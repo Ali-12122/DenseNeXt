@@ -11,6 +11,9 @@ class EnhancedInceptionModule(nn.Module):
 
         self.input_data_depth = input_data_depth
         self.output_data_depth = output_data_depth
+        self.number_of_convolution_filters = number_of_convolution_filters
+        self.max_kernel_size = max_kernel_size
+        self.dimensions_of_convolution = dimensions_of_convolution
 
         # Convolution layers,
 
@@ -27,11 +30,14 @@ class EnhancedInceptionModule(nn.Module):
         # 1x1 Convolution layers,
 
         self.convolution_1d_1x1 = nn.Conv1d(in_channels=input_data_depth,
-                                            out_channels=number_of_convolution_filters, kernel_size=1, bias=False)
+                                            out_channels=number_of_convolution_filters, kernel_size=1, padding='same',
+                                            bias=False)
         self.convolution_2d_1x1 = nn.Conv2d(in_channels=input_data_depth,
-                                            out_channels=number_of_convolution_filters, kernel_size=1, bias=False)
+                                            out_channels=number_of_convolution_filters, kernel_size=1, padding='same',
+                                            bias=False)
         self.convolution_3d_1x1 = nn.Conv3d(in_channels=input_data_depth,
-                                            out_channels=number_of_convolution_filters, kernel_size=1, bias=False)
+                                            out_channels=number_of_convolution_filters, kernel_size=1, padding='same',
+                                            bias=False)
 
         # Max pooling layers,
 
@@ -79,7 +85,7 @@ class EnhancedInceptionModule(nn.Module):
 
         max_pool_output = max_pool(input_data)
         convolution_1x1_output = convolution_1x1(max_pool_output)
-        torch.cat((collective_data, convolution_1x1_output), 0)
+        collective_data = torch.cat((collective_data, convolution_1x1_output), 1)
 
         # Iterating the convolution operation over the data (max_kernel_size - 1) times,
         # Explanation:
@@ -101,24 +107,28 @@ class EnhancedInceptionModule(nn.Module):
         # ( or 1x2 or 2x2x2 for one-dimensional and three-dimensional convolutions.
 
         for i in range(self.max_kernel_size - 1):
+            convolution.in_channels = collective_data.size(dim=1)
             convolution_output = convolution(convolution_input)
-            collective_data = torch.cat((collective_data, convolution_output), 0)
+            collective_data = torch.cat((collective_data, convolution_output), 1)
             convolution_input = convolution_output
 
         # Applying 1x1 convolution to change the depth of the collective_data as to match the
         # desired output depth.
 
         if self.dimensions_of_convolution == 1:
-            output_1x1_convolution = nn.Conv1d(in_channels=collective_data.size(dim=0),
-                                               out_channels=self.output_data_depth, kernel_size=1)
+            output_1x1_convolution = nn.Conv1d(in_channels=collective_data.size(dim=1),
+                                               out_channels=self.output_data_depth, kernel_size=1, padding='same',
+                                               bias=False)
             return output_1x1_convolution(collective_data)
 
         elif self.dimensions_of_convolution == 2:
-            output_1x1_convolution = nn.Conv2d(in_channels=collective_data.size(dim=0),
-                                               out_channels=self.output_data_depth, kernel_size=1)
+            output_1x1_convolution = nn.Conv2d(in_channels=collective_data.size(dim=1),
+                                               out_channels=self.output_data_depth, kernel_size=1, padding='same',
+                                               bias=False)
             return output_1x1_convolution(collective_data)
 
         else:
-            output_1x1_convolution = nn.Conv3d(in_channels=collective_data.size(dim=0),
-                                               out_channels=self.output_data_depth, kernel_size=1)
+            output_1x1_convolution = nn.Conv3d(in_channels=collective_data.size(dim=1),
+                                               out_channels=self.output_data_depth, kernel_size=1, padding='same',
+                                               bias=False)
             return output_1x1_convolution(collective_data)
